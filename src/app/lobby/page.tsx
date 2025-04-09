@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 export default function Lobby() {
   const [name, setName] = useState("");
-  const [players, setPlayers] = useState<string[]>([]);
+  const [players, setPlayers] = useState<{ name: string }[]>([]);
   const [hasJoined, setHasJoined] = useState(false);
   const router = useRouter();
 
@@ -14,20 +14,20 @@ export default function Lobby() {
     fetch("/api/socket");
     socket.connect();
 
-    socket.on("current-players", (names: string[]) => {
+    socket.on("current-players", (names: { name: string }[]) => {
       setPlayers(names);
     });
 
-    socket.on("player-joined", (name: string) => {
-      setPlayers((prev) => [...prev, name]);
+    socket.on("player-joined", (player: { name: string }) => {
+      setPlayers((prev) => [...prev, player]);
     });
 
     socket.on("game-started", () => {
       router.push("/game");
     });
 
-    socket.on("player-left", (name: string) => {
-      setPlayers((prev) => prev.filter((p) => p !== name));
+    socket.on("player-left", (player: { name: string }) => {
+      setPlayers((prev) => prev.filter((p) => p.name !== player.name));
     });
 
     return () => {
@@ -37,9 +37,9 @@ export default function Lobby() {
 
   const joinLobby = () => {
     if (name && !hasJoined) {
-      socket.emit("join-lobby", name);
-      setPlayers((prev) => [...prev, name]);
+      socket.emit("join-lobby", { name });
       setHasJoined(true);
+      localStorage.setItem("playerName", name);
     }
   };
 
@@ -71,7 +71,7 @@ export default function Lobby() {
       <h2 className="text-lg font-semibold">Anslutna spelare:</h2>
       <ul className="list-disc ml-4 mb-4">
         {players.map((p, i) => (
-          <li key={i}>{p}</li>
+          <li key={i}>{p.name}</li>
         ))}
       </ul>
 

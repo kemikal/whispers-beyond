@@ -2,7 +2,7 @@ import { Server } from "socket.io";
 import { NextApiRequest } from "next";
 import { NextApiResponseServerIO } from "@/types/next";
 
-const connectedPlayers = new Set<string>();
+const connectedPlayers = new Map<string, { position: [number, number] }>();
 
 export default function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
   if (!res.socket.server.io) {
@@ -13,21 +13,32 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
     io.on("connection", (socket) => {
       console.log("🔌 Ny spelare ansluten:", socket.id);
 
-      socket.on("join-lobby", (name) => {
+      socket.on("join-lobby", ({ name, position }) => {
         socket.data.name = name;
-        connectedPlayers.add(name);
-        socket.broadcast.emit("player-joined", name);
-        socket.emit("current-players", Array.from(connectedPlayers));
+        socket.data.position = position;
+        connectedPlayers.set(name, { position });
+
+        socket.broadcast.emit("player-joined", { name, position });
+        socket.emit("current-players", Array.from(connectedPlayers.entries()).map(([name, { position }]) => ({ name, position })));
       });
 
       socket.on("start-game", () => {
         io.emit("game-started");
       });
 
+      socket.on("player-move", ({ name, position }) => {
+        socket.broadcast.emit("player-moved", { name, position });
+      });
+
+      socket.on("end-turn", (nextPlayerName) => {
+        io.emit("turn-changed", nextPlayerName);
+      });
+
       socket.on("disconnect", () => {
         console.log("❌ Spelare kopplade från:", socket.id);
-        connectedPlayers.delete(socket.data.name);
-        io.emit("player-left", socket.data.name);
+        const name = socket.data.name;
+        connectedPlayers.delete(name);
+        io.emit("player-left", { name });
       });
     });
 
