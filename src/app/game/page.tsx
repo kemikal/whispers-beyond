@@ -6,29 +6,42 @@ import PlayerHUD from "./playerHUD";
 import InitiativeHUD from "./innitiativeHUD";
 
 export default function GamePage() {
-  const gridCols = 32;
-  const gridRows = 18;
+  const gridCols = 80;
+  const gridRows = 40;
   const [grid, setGrid] = useState<number[][]>([]);
   const [playerPosition, setPlayerPosition] = useState<[number, number] | null>(null);
-  const [players, setPlayers] = useState<{ id: string; name: string; position?: [number, number] }[]>([]);
+  const [players, setPlayers] = useState<{ id: string; name: string; position: [number, number] }[]>([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [movesLeft, setMovesLeft] = useState(5);
   const [actionsLeft, setActionsLeft] = useState(1);
   const [localPlayerName, setLocalPlayerName] = useState("P");
   const [localPlayerId, setLocalPlayerId] = useState<string | null>(null);
+  const [gameReady, setGameReady] = useState(false);
 
   useEffect(() => {
+    if (!socket.connected) {
+      console.log("🔁 Försöker ansluta socket...");
+      socket.connect();
+    }
     socket.on("connect", () => {
-      setLocalPlayerId(socket.id ?? null);
-      const name = localStorage.getItem("playerName") || "P";
-      setLocalPlayerName(name);
+      const id = localStorage.getItem("playerId");
+      const name = localStorage.getItem("playerName");
+      if (id) setLocalPlayerId(id);
+      if (name) setLocalPlayerName(name);
+      
+      console.log("🔌 Socket connected:", socket.id);
+
+      const playerId = localStorage.getItem("playerId");
+      if (playerId) {
+        console.log("📨 Sending join-game with playerId:", playerId);
+        socket.emit("join-game", { playerId });
+      } else {
+        console.warn("⚠️ No playerId in localStorage");
+      }
 
       setTimeout(() => {
-        const offset = players.length;
-        const position: [number, number] = [Math.floor(gridCols / 2) + offset, Math.floor(gridRows / 2)];
-        setPlayerPosition(position);
-        socket.emit("join-lobby", { name, position });
-        console.log("📨 Sent join-lobby on connect (delayed):", { name, position });
+        const name = localStorage.getItem("playerName") || "P";
+        setLocalPlayerName(name);
       }, 50);
       
       // Fallback initial position if no other players
@@ -36,32 +49,15 @@ export default function GamePage() {
       fetch("/api/socket");
     });
 
-    socket.connect();
-
     socket.on("current-players", (existingPlayers: { id: string; name: string; position: [number, number] }[]) => {
-      if (!socket.id) return;
-
-      console.log("📦 Received players from server:", existingPlayers);
-      console.log("🎮 Local player name:", localPlayerName);
-
-      const alreadyJoined = existingPlayers.some(p => p.id === socket.id);
-      console.log("🎯 Already joined:", alreadyJoined);
-
-      const offset = existingPlayers.length;
-      const initialPos: [number, number] = [Math.floor(gridCols / 2) + offset, Math.floor(gridRows / 2)];
-      console.log("📍 Initial position:", initialPos);
-
-      if (!alreadyJoined) {
-        const updatedPlayers = [...existingPlayers, { id: socket.id as string, name: localPlayerName, position: initialPos }];
-        setPlayers(updatedPlayers);
-        console.log("👥 Players list updated:", updatedPlayers);
-      } else {
-        setPlayers(existingPlayers);
-        console.log("👥 Players list updated:", existingPlayers);
-        const localPlayer = existingPlayers.find(p => p.id === socket.id);
-        if (localPlayer) {
-          setPlayerPosition(localPlayer.position);
-        }
+      console.log("📦 Received current-players:", existingPlayers);
+      const id = localStorage.getItem("playerId");
+      console.log("🎮 Local playerId from storage:", id);
+      const local = existingPlayers.find(p => p.id === id);
+      console.log("🔍 Found local player:", local);
+      setPlayers(existingPlayers);
+      if (local?.position) {
+        setPlayerPosition(local.position);
       }
     });
 
@@ -93,9 +89,21 @@ export default function GamePage() {
     });
 
     return () => {
-      socket.disconnect();
+      socket.off("current-players");
+      socket.off("player-joined");
+      socket.off("player-moved");
+      socket.off("turn-changed");
     };
-  }, []);
+  }, [localPlayerName]);
+
+  useEffect(() => {
+    console.log("🔍 Checking if game is ready...");
+    console.log("🧭 playerPosition:", playerPosition);
+    console.log("👥 players:", players);
+    if (playerPosition && players.length > 0) {
+      setGameReady(true);
+    }
+  }, [playerPosition, players]);
 
   function canMoveTo(col: number, row: number): boolean {
     if (!playerPosition || movesLeft <= 0) return false;
@@ -104,7 +112,13 @@ export default function GamePage() {
     return distance > 0 && distance <= movesLeft && !occupied;
   }
 
-  if (!playerPosition) return null;
+  if (!gameReady) {
+    return (
+      <main className="flex justify-center items-center min-h-screen text-xl font-bold">
+        Laddar spel...
+      </main>
+    );
+  }
 
   return (
     <main className="p-4 flex flex-col justify-center items-center min-h-screen">
@@ -135,10 +149,15 @@ export default function GamePage() {
           >
             {grid.map((rowArray, rowIndex) =>
               rowArray.map((_, colIndex) => {
-                const distance =
-                  Math.abs(playerPosition[0] - colIndex) + Math.abs(playerPosition[1] - rowIndex);
+                const distance = Math.abs(playerPosition[0] - colIndex) + Math.abs(playerPosition[1] - rowIndex);
                 const isVisible = distance <= 10;
                 const canMove = canMoveTo(colIndex, rowIndex);
+                const playerInTile = players.find((p) => p.position?.[0] === colIndex && p.position?.[1] === rowIndex);
+
+                if (isVisible && playerInTile) {
+                  console.log("👀 Player in visible tile", colIndex, rowIndex, ":", playerInTile);
+                }
+
                 return (
                   <div
                     key={`${colIndex}-${rowIndex}`}
@@ -168,8 +187,9 @@ export default function GamePage() {
                     }}
                   >
                     {isVisible &&
-                      (players.find((p) => p.position && p.position[0] === colIndex && p.position[1] === rowIndex)?.name.charAt(0) ??
-                        (canMove ? "→" : ""))}
+                      (players.find(
+                        (p) => p.position?.[0] === colIndex && p.position?.[1] === rowIndex
+                      )?.name.charAt(0) ?? (canMove ? "→" : ""))}
                   </div>
                 );
               })

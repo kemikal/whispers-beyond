@@ -14,6 +14,14 @@ export default function Lobby() {
     fetch("/api/socket");
     socket.connect();
 
+    const savedName = localStorage.getItem("playerName");
+    const savedId = localStorage.getItem("playerId");
+    if (savedName && savedId) {
+      setName(savedName);
+      socket.emit("join-lobby", { name: savedName, playerId: savedId });
+      setHasJoined(true);
+    }
+
     socket.on("current-players", (list: { id: string; name: string }[]) => {
       setPlayers(list);
     });
@@ -39,8 +47,9 @@ export default function Lobby() {
   }, []);
 
   const joinLobby = () => {
-    if (name && !hasJoined) {
-      socket.emit("join-lobby", { name });
+    const playerId = localStorage.getItem("playerId");
+    if (name && playerId && !hasJoined) {
+      socket.emit("join-lobby", { name, playerId });
       setHasJoined(true);
       localStorage.setItem("playerName", name);
     }
