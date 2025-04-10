@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import socket from "@/lib/socketClient";
+import PlayerHUD from "./playerHUD";
+import InitiativeHUD from "./innitiativeHUD";
 
 export default function GamePage() {
   const gridCols = 32;
@@ -105,35 +107,21 @@ export default function GamePage() {
   if (!playerPosition) return null;
 
   return (
-    <main className="p-4 flex justify-center items-center min-h-screen">
+    <main className="p-4 flex flex-col justify-center items-center min-h-screen">
       {playerPosition && (
         <>
-          <div className="absolute top-4 left-4 bg-white bg-opacity-80 p-4 rounded shadow text-sm z-10">
-            <div className="mb-2">
-              <strong>Spelare:</strong>
-              <ul className="list-disc list-inside">
-                {players.map((p, i) => (
-                  <li key={p.id} className={i === currentTurnIndex ? "font-bold text-blue-600" : ""}>
-                    {p.name} {i === currentTurnIndex && "(tur)"}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="mb-1"><strong>Tur:</strong> {players[currentTurnIndex]?.name ?? localPlayerName}</div>
-            <div><strong>Rörelser kvar:</strong> {movesLeft}</div>
-            <div><strong>Handlingar kvar:</strong> {actionsLeft}</div>
-            {players[currentTurnIndex]?.id === localPlayerId && (
-              <button
-                className="mt-2 px-4 py-2 bg-blue-600 text-white rounded"
-                onClick={() => {
-                  const nextIndex = (currentTurnIndex + 1) % players.length;
-                  socket.emit("end-turn", players[nextIndex].id);
-                }}
-              >
-                Klar
-              </button>
-            )}
-          </div>
+          <InitiativeHUD players={players} currentTurnIndex={currentTurnIndex} />
+          <PlayerHUD
+            players={players}
+            currentTurnIndex={currentTurnIndex}
+            movesLeft={movesLeft}
+            actionsLeft={actionsLeft}
+            localPlayerId={localPlayerId}
+            onEndTurn={() => {
+              const nextIndex = (currentTurnIndex + 1) % players.length;
+              socket.emit("end-turn", players[nextIndex].id);
+            }}
+          />
           <div
             className="grid"
             style={{
