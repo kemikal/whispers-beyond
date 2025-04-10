@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 export default function Lobby() {
   const [name, setName] = useState("");
-  const [players, setPlayers] = useState<{ name: string }[]>([]);
+  const [players, setPlayers] = useState<{ id: string; name: string }[]>([]);
   const [hasJoined, setHasJoined] = useState(false);
   const router = useRouter();
 
@@ -14,20 +14,23 @@ export default function Lobby() {
     fetch("/api/socket");
     socket.connect();
 
-    socket.on("current-players", (names: { name: string }[]) => {
-      setPlayers(names);
+    socket.on("current-players", (list: { id: string; name: string }[]) => {
+      setPlayers(list);
     });
 
-    socket.on("player-joined", (player: { name: string }) => {
-      setPlayers((prev) => [...prev, player]);
+    socket.on("player-joined", (player: { id: string; name: string }) => {
+      setPlayers((prev) => {
+        if (prev.find((p) => p.id === player.id)) return prev;
+        return [...prev, player];
+      });
     });
 
     socket.on("game-started", () => {
       router.push("/game");
     });
 
-    socket.on("player-left", (player: { name: string }) => {
-      setPlayers((prev) => prev.filter((p) => p.name !== player.name));
+    socket.on("player-left", (player: { id: string }) => {
+      setPlayers((prev) => prev.filter((p) => p.id !== player.id));
     });
 
     return () => {

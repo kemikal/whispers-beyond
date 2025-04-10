@@ -8,44 +8,79 @@ export default function GamePage() {
   const gridRows = 18;
   const [grid, setGrid] = useState<number[][]>([]);
   const [playerPosition, setPlayerPosition] = useState<[number, number] | null>(null);
-  const [players, setPlayers] = useState<{ name: string; position: [number, number] }[]>([]);
+  const [players, setPlayers] = useState<{ id: string; name: string; position?: [number, number] }[]>([]);
   const [currentTurnIndex, setCurrentTurnIndex] = useState(0);
   const [movesLeft, setMovesLeft] = useState(5);
   const [actionsLeft, setActionsLeft] = useState(1);
   const [localPlayerName, setLocalPlayerName] = useState("P");
+  const [localPlayerId, setLocalPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/socket");
-    socket.connect();
-    setGrid(Array.from({ length: gridRows }, () => Array(gridCols).fill(0)));
-
-    socket.on("current-players", (existingPlayers: { name: string; position: [number, number] }[]) => {
+    socket.on("connect", () => {
+      setLocalPlayerId(socket.id ?? null);
       const name = localStorage.getItem("playerName") || "P";
-      const offset = existingPlayers.length;
-      const initialPos: [number, number] = [Math.floor(gridCols / 2) + offset, Math.floor(gridRows / 2)];
-
-      setPlayerPosition(initialPos);
       setLocalPlayerName(name);
-      setPlayers([...existingPlayers, { name, position: initialPos }]);
-      socket.emit("join-lobby", { name, position: initialPos });
+
+      setTimeout(() => {
+        const offset = players.length;
+        const position: [number, number] = [Math.floor(gridCols / 2) + offset, Math.floor(gridRows / 2)];
+        setPlayerPosition(position);
+        socket.emit("join-lobby", { name, position });
+        console.log("📨 Sent join-lobby on connect (delayed):", { name, position });
+      }, 50);
+      
+      // Fallback initial position if no other players
+      setGrid(Array.from({ length: gridRows }, () => Array(gridCols).fill(0)));
+      fetch("/api/socket");
     });
 
-    socket.on("player-joined", ({ name, position }: { name: string; position: [number, number] }) => {
+    socket.connect();
+
+    socket.on("current-players", (existingPlayers: { id: string; name: string; position: [number, number] }[]) => {
+      if (!socket.id) return;
+
+      console.log("📦 Received players from server:", existingPlayers);
+      console.log("🎮 Local player name:", localPlayerName);
+
+      const alreadyJoined = existingPlayers.some(p => p.id === socket.id);
+      console.log("🎯 Already joined:", alreadyJoined);
+
+      const offset = existingPlayers.length;
+      const initialPos: [number, number] = [Math.floor(gridCols / 2) + offset, Math.floor(gridRows / 2)];
+      console.log("📍 Initial position:", initialPos);
+
+      if (!alreadyJoined) {
+        const updatedPlayers = [...existingPlayers, { id: socket.id as string, name: localPlayerName, position: initialPos }];
+        setPlayers(updatedPlayers);
+        console.log("👥 Players list updated:", updatedPlayers);
+      } else {
+        setPlayers(existingPlayers);
+        console.log("👥 Players list updated:", existingPlayers);
+        const localPlayer = existingPlayers.find(p => p.id === socket.id);
+        if (localPlayer) {
+          setPlayerPosition(localPlayer.position);
+        }
+      }
+    });
+
+    socket.on("player-joined", ({ id, name, position }: { id: string; name: string; position: [number, number] }) => {
       setPlayers((prev) => {
-        if (prev.find((p) => p.name === name)) return prev;
-        return [...prev, { name, position }];
+        if (prev.find((p) => p.id === id)) return prev;
+        const updatedPlayers = [...prev, { id, name, position }];
+        console.log("👥 Players list updated:", updatedPlayers);
+        return updatedPlayers;
       });
     });
 
-    socket.on("player-moved", ({ name, position }: { name: string; position: [number, number] }) => {
+    socket.on("player-moved", ({ id, position }: { id: string; position: [number, number] }) => {
       setPlayers((prev) =>
-        prev.map((p) => (p.name === name ? { ...p, position } : p))
+        prev.map((p) => (p.id === id ? { ...p, position } : p))
       );
     });
 
-    socket.on("turn-changed", (nextPlayerName: string) => {
+    socket.on("turn-changed", (nextPlayerId: string) => {
       setPlayers((prevPlayers) => {
-        const index = prevPlayers.findIndex((p) => p.name === nextPlayerName);
+        const index = prevPlayers.findIndex((p) => p.id === nextPlayerId);
         if (index !== -1) {
           setCurrentTurnIndex(index);
           setMovesLeft(5);
@@ -63,7 +98,7 @@ export default function GamePage() {
   function canMoveTo(col: number, row: number): boolean {
     if (!playerPosition || movesLeft <= 0) return false;
     const distance = Math.abs(playerPosition[0] - col) + Math.abs(playerPosition[1] - row);
-    const occupied = players.some(p => p.position[0] === col && p.position[1] === row);
+    const occupied = players.some(p => p.position && p.position[0] === col && p.position[1] === row);
     return distance > 0 && distance <= movesLeft && !occupied;
   }
 
@@ -78,21 +113,21 @@ export default function GamePage() {
               <strong>Spelare:</strong>
               <ul className="list-disc list-inside">
                 {players.map((p, i) => (
-                  <li key={i} className={i === currentTurnIndex ? "font-bold text-blue-600" : ""}>
+                  <li key={p.id} className={i === currentTurnIndex ? "font-bold text-blue-600" : ""}>
                     {p.name} {i === currentTurnIndex && "(tur)"}
                   </li>
                 ))}
               </ul>
             </div>
-            <div className="mb-1"><strong>Tur:</strong> {players[currentTurnIndex]?.name}</div>
+            <div className="mb-1"><strong>Tur:</strong> {players[currentTurnIndex]?.name ?? localPlayerName}</div>
             <div><strong>Rörelser kvar:</strong> {movesLeft}</div>
             <div><strong>Handlingar kvar:</strong> {actionsLeft}</div>
-            {players[currentTurnIndex]?.name === localPlayerName && (
+            {players[currentTurnIndex]?.id === localPlayerId && (
               <button
                 className="mt-2 px-4 py-2 bg-blue-600 text-white rounded"
                 onClick={() => {
                   const nextIndex = (currentTurnIndex + 1) % players.length;
-                  socket.emit("end-turn", players[nextIndex].name);
+                  socket.emit("end-turn", players[nextIndex].id);
                 }}
               >
                 Klar
@@ -120,7 +155,7 @@ export default function GamePage() {
                   <div
                     key={`${colIndex}-${rowIndex}`}
                     onClick={() => {
-                      if (canMove && players[currentTurnIndex]?.name === localPlayerName) {
+                      if (canMove && players[currentTurnIndex]?.id === localPlayerId) {
                         setPlayerPosition([colIndex, rowIndex]);
                         setMovesLeft((prev) => prev - distance);
                         setPlayers((prev) =>
@@ -129,7 +164,7 @@ export default function GamePage() {
                           )
                         );
                         socket.emit("player-move", {
-                          name: players[currentTurnIndex].name,
+                          id: players[currentTurnIndex].id,
                           position: [colIndex, rowIndex],
                         });
                       }
@@ -145,7 +180,7 @@ export default function GamePage() {
                     }}
                   >
                     {isVisible &&
-                      (players.find((p) => p.position[0] === colIndex && p.position[1] === rowIndex)?.name.charAt(0) ??
+                      (players.find((p) => p.position && p.position[0] === colIndex && p.position[1] === rowIndex)?.name.charAt(0) ??
                         (canMove ? "→" : ""))}
                   </div>
                 );
